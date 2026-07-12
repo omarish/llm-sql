@@ -15,11 +15,16 @@ services:
       # PG18 images store data in a version-specific subdir
       # (/var/lib/postgresql/18/docker), so mount the parent dir, not
       # the old /var/lib/postgresql/data path.
-      - postgres_data:/var/lib/postgresql
+      - postgres_data2:/var/lib/postgresql
       - ./init:/docker-entrypoint-initdb.d
     # Parallel workers use POSIX shared memory in /dev/shm; the 64MB default
     # can bottleneck big parallel scans / index builds.
     shm_size: "1gb"
+    # Docker's default seccomp profile blocks the io_uring syscalls PG18 uses
+    # for async I/O. Running unconfined lets io_uring work. Fine for a local
+    # toy; use a targeted profile (default + io_uring_* syscalls) if you care.
+    security_opt:
+      - seccomp=unconfined
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d llm_sql"]
       interval: 10s
@@ -27,6 +32,9 @@ services:
       retries: 5
     command:
       - "postgres"
+      # --- Postgres 18 Async I/O (io_uring) ---
+      - "-c"
+      - "io_method=io_uring"
       # --- Durability OFF: fastest possible writes, but a crash can corrupt
       #     the DB. Perfectly fine for a disposable local toy. ---
       - "-c"
@@ -74,4 +82,4 @@ services:
       - "max_parallel_maintenance_workers=4"
 
 volumes:
-  postgres_data:
+  postgres_data2:

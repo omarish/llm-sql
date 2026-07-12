@@ -1,1 +1,10 @@
+# Exported model weights / tokenizer assets (regenerate with weights/export_pgvector.py)
 *.csv
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# OS / editor
+.DS_Store

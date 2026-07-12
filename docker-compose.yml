@@ -4,19 +4,74 @@ services:
     container_name: llm-sql-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-llm_sql}
+      # Local toy setup: no real auth. `trust` lets anyone connect without a
+      # password. Do NOT use this anywhere reachable by other machines.
+      POSTGRES_USER: postgres
+      POSTGRES_DB: llm_sql
+      POSTGRES_HOST_AUTH_METHOD: trust
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # PG18 images store data in a version-specific subdir
+      # (/var/lib/postgresql/18/docker), so mount the parent dir, not
+      # the old /var/lib/postgresql/data path.
+      - postgres_data:/var/lib/postgresql
       - ./init:/docker-entrypoint-initdb.d
+    # Parallel workers use POSIX shared memory in /dev/shm; the 64MB default
+    # can bottleneck big parallel scans / index builds.
+    shm_size: "1gb"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-llm_sql}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d llm_sql"]
       interval: 10s
       timeout: 5s
       retries: 5
+    command:
+      - "postgres"
+      # --- Durability OFF: fastest possible writes, but a crash can corrupt
+      #     the DB. Perfectly fine for a disposable local toy. ---
+      - "-c"
+      - "fsync=off"
+      - "-c"
+      - "synchronous_commit=off"
+      - "-c"
+      - "full_page_writes=off"
+      # --- Memory. Tuned for ~16GB RAM machine; bump/lower to taste. ---
+      - "-c"
+      - "shared_buffers=4GB"
+      - "-c"
+      - "effective_cache_size=12GB"
+      - "-c"
+      - "work_mem=256MB"
+      - "-c"
+      - "maintenance_work_mem=2GB"
+      # --- WAL: fewer, larger checkpoints => less write amplification. ---
+      - "-c"
+      - "wal_level=minimal"
+      - "-c"
+      - "max_wal_senders=0"
+      - "-c"
+      - "max_wal_size=8GB"
+      - "-c"
+      - "min_wal_size=2GB"
+      - "-c"
+      - "checkpoint_timeout=30min"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      # --- Planner: assume fast local SSD/NVMe. ---
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      # --- Parallelism: speeds up big scans and (crucially) pgvector index
+      #     builds via max_parallel_maintenance_workers. ---
+      - "-c"
+      - "max_worker_processes=8"
+      - "-c"
+      - "max_parallel_workers=8"
+      - "-c"
+      - "max_parallel_workers_per_gather=4"
+      - "-c"
+      - "max_parallel_maintenance_workers=4"
 
 volumes:
   postgres_data:
